@@ -3,6 +3,10 @@
 
 #include<vector>
 
+#ifndef TEST_COMPILE_ERRORS
+#define CHECK_COMPILE_FAILS(...)
+#endif
+
 TEST_CASE("std::vector has a .size() method")
 {
   std::vector<int> v;
