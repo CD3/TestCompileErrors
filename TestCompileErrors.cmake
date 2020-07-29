@@ -7,6 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # write the script that will perform the tests
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/TestCompileErrors.py
 "
+
 import json
 import subprocess
 import pathlib
@@ -15,6 +16,7 @@ import copy
 import sys
 import os
 import itertools
+from multiprocessing import Pool
 
 from argparse import ArgumentParser
 
@@ -41,7 +43,7 @@ def GetCodeSnippets(file):
 
       i += 1
 
-    snippets.append((text[pos:i], text[pos+len(flag):i-1]))
+    snippets.append({'range':(pos,i),'snippet':text[pos+len(flag):i-1]})
 
     pos = text.find(flag,pos+1)
 
@@ -55,7 +57,23 @@ def find_file(name):
       return dir/name
   return None
 
+def try_to_compile(entry):
+    should_fail = not pathlib.Path(entry['file']).stem.endswith('.0')
+    ret = subprocess.run(entry['command'],shell=True,cwd=pathlib.Path(entry['directory']),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    test_failed = ret.returncode!=0 ^ should_fail
+    message = { 'failed':test_failed,
+                'reason':f'''Snippet in '{entry['file']}' should not have compiled, but it did.''',
+                'returncode':ret.returncode,
+                'output':ret.stdout.decode('utf-8'),
+                'snippet': entry['snippet'],
+                'command': entry['command'],
+                'file': entry['file'],
+                'original_snippet_location': entry['original_snippet_location'],
+                }
+    if not should_fail:
+      message['reason'] = f'''Code without snippets in '{entry['file']}' should have compiled, but it did not.'''
 
+    return message
 
 def main():
   parser = ArgumentParser(description='Test that snippets of code do or do not compile.')
@@ -95,21 +113,25 @@ def main():
       text = file.read_text()
       for i in range(-1,len(snippets)):
         tmp_file = scratch_dir / (file.stem+f'.{i+1}'+file.suffix)
-        tmp_text = text
+        tmp_text = list()
+        pos = 0
         for j in range(len(snippets)):
+          tmp_text.append( text[pos:snippets[j]['range'][0]] )
+          pos = snippets[j]['range'][1]
           if j == i:
-            tmp_text = tmp_text.replace(*snippets[j])
+            tmp_text.append( snippets[j]['snippet'])
           else:
-            tmp_text = tmp_text.replace(snippets[j][0],'')
+            tmp_text.append( '')
+        tmp_text.append( text[pos:] )
 
-
-        tmp_file.write_text(tmp_text)
+        tmp_file.write_text(''.join(tmp_text))
 
         new_entry = copy.deepcopy(entry)
         new_entry['file'] = str(tmp_file.absolute())
         new_entry['command'] = new_entry['command'].replace( entry['file'], new_entry['file'] )
+        new_entry['original_snippet_location'] = f'''{str(file.absolute())}|{text[0:snippets[i]['range'][0]].count(os.linesep)+1}'''
         if i >= 0:
-          new_entry['snippet'] = snippets[i][1]
+          new_entry['snippet'] = snippets[i]['snippet']
         else:
           new_entry['snippet'] = None
 
@@ -117,54 +139,41 @@ def main():
 
 
   returncode = 0
-  messages = []
-  for entry in new_database:
-    should_fail = not pathlib.Path(entry['file']).stem.endswith('0')
-    ret = subprocess.run(entry['command'],shell=True,cwd=pathlib.Path(entry['directory']),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-    test_failed = ret.returncode!=0 ^ should_fail
-    returncode += test_failed
-    message = { 'failed':test_failed,
-                'reason':f'''Snippet in '{entry['file']}' should not have compiled, but it did.''',
-                'returncode':ret.returncode,
-                'output':ret.stdout.decode('utf-8'),
-                'snippet': entry['snippet'],
-                'command': entry['command'],
-                'file': entry['file']
-                }
-    if not should_fail:
-      message['reason'] = f'''Code without snippets in '{entry['file']}'should have compiled, but it did not.'''
-    messages.append(message)
-
-
+  p = Pool()
+  messages = p.map(try_to_compile,new_database)
 
 
   for message in messages:
+    if message['failed']:
+      returncode += 1
     if not args.verbose:
       if message['failed']:
-        print('Test Failed:')
-        print('	Reason:',message['reason'])
+        print('=Test Failed=')
+        print('=============')
+        print('Reason:',message['reason'])
         if message['returncode'] == 1:
-          print('	Command:',message['command'])
-          print('	Compiler Output:')
-          print('====')
+          print('Command:',message['command'])
+          print('Compiler Output:')
+          print('v----------------------v')
           print(message['output'])
-          print('====')
+          print('^----------------------^')
         else:
-          print('	Command:',message['command'])
-          print('	Snippet:')
-          print('====')
+          print('Command:',message['command'])
+          print('Snippet:')
+          print('v---------------------v')
           print(message['snippet'])
-          print('====')
+          print('^---------------------^')
+          print('Original Snippet Location:', message['original_snippet_location'])
     else:
       print('File:',message['file'])
       print('Snippet:',message['snippet'])
-      print('====')
+      print('v---------------------v')
       print(message['snippet'])
-      print('====')
+      print('^---------------------^')
       print('Compiler Output:')
-      print('====')
+      print('v---------------------v')
       print(message['output'])
-      print('====')
+      print('^---------------------^')
 
   sys.exit(returncode)
 
@@ -173,6 +182,7 @@ def main():
 
 if __name__ == '__main__':
   main()
+
 
 
 "
