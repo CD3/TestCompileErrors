@@ -29,7 +29,7 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/TestCompileErrors-RemoveFailSnippets.h
 add_compile_definitions( TEST_COMPILE_ERRORS )
 # force include the file above
 if(MSVC)
-add_compile_options(/FI ${CMAKE_CURRENT_BINARY_DIR}/TestCompileErrors-RemoveFailSnippets.h)
+add_compile_options(/FI${CMAKE_CURRENT_BINARY_DIR}/TestCompileErrors-RemoveFailSnippets.h)
 else()
 add_compile_options(-include ${CMAKE_CURRENT_BINARY_DIR}/TestCompileErrors-RemoveFailSnippets.h)
 endif()
