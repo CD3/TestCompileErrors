@@ -20,6 +20,7 @@ import copy
 import sys
 import os
 import itertools
+import pprint
 from multiprocessing import Pool
 
 from argparse import ArgumentParser
@@ -64,7 +65,7 @@ def find_file(name):
 def try_to_compile(entry):
     should_fail = not pathlib.Path(entry['file']).stem.endswith('.0')
     ret = subprocess.run(entry['command'],shell=True,cwd=pathlib.Path(entry['directory']),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-    test_failed = ret.returncode!=0 ^ should_fail
+    test_failed = ret.returncode==0 if should_fail else ret.returncode!=0
     message = { 'failed':test_failed,
                 'reason':f'''Snippet in '{entry['file']}' should not have compiled, but it did.''',
                 'returncode':ret.returncode,
@@ -132,7 +133,7 @@ def main():
 
         new_entry = copy.deepcopy(entry)
         new_entry['file'] = str(tmp_file.absolute())
-        new_entry['command'] = new_entry['command'].replace( entry['file'], new_entry['file'] )
+        new_entry['command'] = new_entry['command'].replace( str(pathlib.Path(entry['file'])), new_entry['file'] )
         new_entry['original_snippet_location'] = f'''{str(file.absolute())}|{text[0:snippets[i]['range'][0]].count(os.linesep)+1}'''
         if i >= 0:
           new_entry['snippet'] = snippets[i]['snippet']
@@ -142,11 +143,11 @@ def main():
         new_database.append(new_entry)
 
 
-  returncode = 0
   p = Pool()
   messages = p.map(try_to_compile,new_database)
 
 
+  returncode = 0
   for message in messages:
     if message['failed']:
       returncode += 1
@@ -180,9 +181,6 @@ def main():
       print('^---------------------^')
 
   sys.exit(returncode)
-
-
-
 
 if __name__ == '__main__':
   main()
